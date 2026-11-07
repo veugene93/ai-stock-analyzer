@@ -6,42 +6,76 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(
-    page_title="AI Stock Analyzer",
+    page_title="AI Multi-Asset Analyzer",
     page_icon="📈",
     layout="wide"
 )
 
-st.title("AI STOCK ANALYZER")
+st.title("AI MULTI-ASSET MARKET ANALYZER")
+
 st.caption(
-    "Independent quantitative stock analysis "
-    "| Historical market data | Risk assessment"
+    "Stocks | ETFs | Crypto | Mutual Funds | Futures "
+    "| Technical Analysis | Risk Management | Backtesting"
 )
 
+# ==========================================
+# 1. ASSET SEARCH
+# ==========================================
 
-# ==========================================
-# 1. STOCK SEARCH
-# ==========================================
+ASSET_TYPES = {
+    "EQUITY": "Stock",
+    "ETF": "ETF",
+    "CRYPTOCURRENCY": "Cryptocurrency",
+    "MUTUALFUND": "Mutual Fund",
+    "FUTURE": "Futures Contract"
+}
 
 @st.cache_data(ttl=3600)
-def search_stock(query):
+def search_assets(query):
+
     try:
-        result = yf.Search(query, max_results=10)
-        quotes = result.quotes
+        result = yf.Search(
+            query,
+            max_results=25,
+            news_count=0
+        )
 
-        stocks = []
+        assets = []
 
-        for item in quotes:
-            if item.get("quoteType") == "EQUITY":
-                stocks.append({
-                    "symbol": item.get("symbol"),
-                    "name": (
-                        item.get("shortname")
-                        or item.get("longname")
-                        or item.get("symbol")
-                    )
-                })
+        for item in result.quotes:
 
-        return stocks
+            quote_type = item.get("quoteType", "")
+
+            if quote_type not in ASSET_TYPES:
+                continue
+
+            symbol = item.get("symbol")
+
+            if not symbol:
+                continue
+
+            assets.append({
+                "symbol": symbol,
+                "name": (
+                    item.get("shortname")
+                    or item.get("longname")
+                    or symbol
+                ),
+                "type": ASSET_TYPES[quote_type],
+                "exchange": (
+                    item.get("exchange")
+                    or item.get("exchDisp")
+                    or "Unknown"
+                ),
+                "currency": item.get("currency", "Unknown")
+            })
+
+        unique = {
+            asset["symbol"]: asset
+            for asset in assets
+        }
+
+        return list(unique.values())
 
     except Exception:
         return []
@@ -53,7 +87,9 @@ def search_stock(query):
 
 @st.cache_data(ttl=1800)
 def load_history(ticker):
+
     try:
+
         stock = yf.Ticker(ticker)
 
         data = stock.history(
@@ -73,6 +109,7 @@ def load_history(ticker):
         return None
 
 
+
 # ==========================================
 # 3. TECHNICAL INDICATORS
 # ==========================================
@@ -86,14 +123,15 @@ def calculate_indicators(df):
     low = df["Low"]
     volume = df["Volume"]
 
-    # Moving averages
+    # Simple Moving Averages
 
-    df["SMA20"] = close.rolling(20).mean()
-    df["SMA50"] = close.rolling(50).mean()
-    df["SMA100"] = close.rolling(100).mean()
-    df["SMA200"] = close.rolling(200).mean()
+    for period in [20, 50, 100, 200]:
 
-    # Exponential moving averages
+        df[f"SMA{period}"] = (
+            close.rolling(period).mean()
+        )
+
+    # Exponential Moving Averages
 
     df["EMA12"] = close.ewm(
         span=12,
@@ -139,7 +177,9 @@ def calculate_indicators(df):
 
     rs = avg_gain / avg_loss.replace(0, np.nan)
 
-    df["RSI"] = 100 - (100 / (1 + rs))
+    df["RSI"] = (
+        100 - (100 / (1 + rs))
+    )
 
     df["RSI"] = df["RSI"].fillna(50)
 
@@ -175,7 +215,9 @@ def calculate_indicators(df):
 
     # On Balance Volume
 
-    direction = np.sign(close.diff()).fillna(0)
+    direction = np.sign(
+        close.diff()
+    ).fillna(0)
 
     df["OBV"] = (
         direction * volume.fillna(0)
@@ -185,7 +227,7 @@ def calculate_indicators(df):
 
     df["RETURNS"] = close.pct_change()
 
-    # Annualized historical volatility
+    # Annualized volatility
 
     df["VOLATILITY"] = (
         df["RETURNS"].rolling(20).std()
@@ -193,7 +235,7 @@ def calculate_indicators(df):
         * 100
     )
 
-    # Average trading volume
+    # Average volume
 
     df["AVG_VOLUME"] = volume.rolling(20).mean()
 
@@ -215,15 +257,22 @@ def calculate_risks(df):
         1 + returns
     ).cumprod()
 
-    running_max = cumulative_returns.cummax()
+    running_max = (
+        cumulative_returns.cummax()
+    )
 
     drawdown = (
         cumulative_returns / running_max
     ) - 1
 
-    var_95 = np.percentile(returns, 5)
+    var_95 = np.percentile(
+        returns,
+        5
+    )
 
-    tail_returns = returns[returns <= var_95]
+    tail_returns = returns[
+        returns <= var_95
+    ]
 
     cvar_95 = (
         tail_returns.mean()
@@ -232,14 +281,23 @@ def calculate_risks(df):
     )
 
     annual_volatility = (
-        returns.std() * np.sqrt(252) * 100
+        returns.std()
+        * np.sqrt(252)
+        * 100
     )
 
     return {
+
         "annual_volatility": annual_volatility,
-        "max_drawdown": abs(drawdown.min()) * 100,
+
+        "max_drawdown": (
+            abs(drawdown.min()) * 100
+        ),
+
         "var_95": abs(var_95) * 100,
+
         "cvar_95": abs(cvar_95) * 100
+
     }
 
 
@@ -267,19 +325,25 @@ def calculate_score(df):
     # RSI analysis
 
     if 50 < last["RSI"] < 70:
+
         score += 1
 
     elif last["RSI"] < 30:
+
         score += 1
 
     elif last["RSI"] > 75:
+
         score -= 2
 
     # MACD analysis
 
     if last["MACD"] > last["MACD_SIGNAL"]:
+
         score += 1
+
     else:
+
         score -= 1
 
     # Volume analysis
@@ -289,21 +353,31 @@ def calculate_score(df):
         and last["AVG_VOLUME"] > 0
         and last["Volume"] > last["AVG_VOLUME"]
     ):
+
         if last["Close"] > df["Close"].iloc[-2]:
+
             score += 1
+
         else:
+
             score -= 1
 
+    # Final signal
+
     if score >= 5:
+
         signal = "BULLISH"
 
     elif score >= 2:
+
         signal = "MODERATELY BULLISH"
 
     elif score <= -2:
+
         signal = "BEARISH"
 
     else:
+
         signal = "HOLD / WAIT"
 
     return score, signal
@@ -332,150 +406,254 @@ def calculate_position_size(
     capital,
     risk_percent,
     entry_price,
-    stop_price
+    stop_price,
+    fractional=False
 ):
-    pass
+
+    if capital <= 0 or entry_price <= 0:
+        return 0
+
+    risk_amount = (
+        capital * risk_percent / 100
+    )
+
+    risk_per_unit = abs(
+        entry_price - stop_price
+    )
+
+    if risk_per_unit <= 0:
+        return 0
+
+    risk_quantity = (
+        risk_amount / risk_per_unit
+    )
+
+    affordable_quantity = (
+        capital / entry_price
+    )
+
+    quantity = min(
+        risk_quantity,
+        affordable_quantity
+    )
+
+    if fractional:
+
+        return round(quantity, 8)
+
+    return max(int(quantity), 0)
+
 
 # ==========================================
-# BACKTESTING ENGINE
+# 8. BACKTESTING ENGINE
 # ==========================================
 
 def run_backtest(
     df,
     initial_capital=10000,
-    transaction_cost_bps=10
+    transaction_cost_bps=10,
+    annualization=252
 ):
 
     data = df.copy()
 
     if len(data) < 210:
+
         raise ValueError(
             "At least 210 trading observations are required."
         )
 
-    # Generate trading signals using historical closing data.
+    # Generate trading signals
+
     data["SIGNAL"] = (
-        (data["SMA50"] > data["SMA200"]) &
-        (data["RSI"] > 50)
+
+        (data["SMA50"] > data["SMA200"])
+        & (data["RSI"] > 50)
+
     ).astype(int)
 
-    # Execute signals on the following trading session.
-    data["POSITION"] = data["SIGNAL"].shift(1).fillna(0)
+    # Execute signals on the following session
 
-    # Daily asset returns.
-    data["MARKET_RETURN"] = data["Close"].pct_change()
-
-    # Position changes represent transactions.
-    data["TURNOVER"] = data["POSITION"].diff().abs()
-
-    data["TURNOVER"] = data["TURNOVER"].fillna(
-        data["POSITION"].abs()
+    data["POSITION"] = (
+        data["SIGNAL"].shift(1).fillna(0)
     )
 
-    # Transaction costs in basis points.
-    cost_rate = transaction_cost_bps / 10000
+    # Market returns
+
+    data["MARKET_RETURN"] = (
+        data["Close"].pct_change()
+    )
+
+    # Calculate transactions
+
+    data["TURNOVER"] = (
+        data["POSITION"].diff().abs()
+    )
+
+    data["TURNOVER"] = (
+        data["TURNOVER"].fillna(
+            data["POSITION"].abs()
+        )
+    )
+
+    # Transaction costs
+
+    cost_rate = (
+        transaction_cost_bps / 10000
+    )
 
     data["TRANSACTION_COST"] = (
         data["TURNOVER"] * cost_rate
     )
 
-    # Strategy returns after transaction costs.
-    data["STRATEGY_RETURN"] = (
-        data["POSITION"] * data["MARKET_RETURN"]
-        - data["TRANSACTION_COST"]
-    )
+    # Strategy returns
 
     data["STRATEGY_RETURN"] = (
-        data["STRATEGY_RETURN"].fillna(0)
-    )
+
+        data["POSITION"] * data["MARKET_RETURN"]
+        - data["TRANSACTION_COST"]
+
+    ).fillna(0)
+
+    # Buy and hold returns
 
     data["BUY_HOLD_RETURN"] = (
         data["MARKET_RETURN"].fillna(0)
     )
 
-    # Portfolio equity curves.
+    # Equity curves
+
     data["STRATEGY_EQUITY"] = (
-        initial_capital *
-        (1 + data["STRATEGY_RETURN"]).cumprod()
+
+        initial_capital
+        * (1 + data["STRATEGY_RETURN"]).cumprod()
+
     )
 
     data["BUY_HOLD_EQUITY"] = (
-        initial_capital *
-        (1 + data["BUY_HOLD_RETURN"]).cumprod()
+
+        initial_capital
+        * (1 + data["BUY_HOLD_RETURN"]).cumprod()
+
     )
 
-    # Calculate drawdowns.
+    # Drawdowns
+
     data["STRATEGY_DRAWDOWN"] = (
-        data["STRATEGY_EQUITY"] /
-        data["STRATEGY_EQUITY"].cummax()
+
+        data["STRATEGY_EQUITY"]
+        / data["STRATEGY_EQUITY"].cummax()
+
     ) - 1
 
     data["BUY_HOLD_DRAWDOWN"] = (
-        data["BUY_HOLD_EQUITY"] /
-        data["BUY_HOLD_EQUITY"].cummax()
+
+        data["BUY_HOLD_EQUITY"]
+        / data["BUY_HOLD_EQUITY"].cummax()
+
     ) - 1
 
-    # Performance metrics.
+    # Performance calculations
+
     observations = len(data)
 
-    years = observations / 252
+    years = observations / annualization
+
+    final_capital = (
+        data["STRATEGY_EQUITY"].iloc[-1]
+    )
 
     total_return = (
-        data["STRATEGY_EQUITY"].iloc[-1] /
-        initial_capital
+        final_capital / initial_capital
     ) - 1
 
     buy_hold_return = (
-        data["BUY_HOLD_EQUITY"].iloc[-1] /
-        initial_capital
+
+        data["BUY_HOLD_EQUITY"].iloc[-1]
+        / initial_capital
+
     ) - 1
 
-    if years > 0:
+    if years > 0 and final_capital > 0:
+
         cagr = (
-            data["STRATEGY_EQUITY"].iloc[-1] /
-            initial_capital
-        ) ** (1 / years) - 1
+
+            (final_capital / initial_capital)
+            ** (1 / years)
+
+        ) - 1
+
     else:
+
         cagr = 0
 
     daily_returns = data["STRATEGY_RETURN"]
 
     annual_volatility = (
-        daily_returns.std() * np.sqrt(252)
+
+        daily_returns.std()
+        * np.sqrt(annualization)
+
     )
 
     if daily_returns.std() > 0:
+
         sharpe_ratio = (
-            daily_returns.mean() /
-            daily_returns.std()
-        ) * np.sqrt(252)
+
+            daily_returns.mean()
+            / daily_returns.std()
+
+        ) * np.sqrt(annualization)
+
     else:
+
         sharpe_ratio = 0
 
     max_drawdown = abs(
         data["STRATEGY_DRAWDOWN"].min()
     )
 
-    exposure = data["POSITION"].mean()
+    exposure = (
+        data["POSITION"].mean()
+    )
 
     trades = int(
         (data["TURNOVER"] > 0).sum()
     )
 
+    # Metrics dictionary
+
     metrics = {
+
         "Initial Capital": initial_capital,
-        "Final Capital": data["STRATEGY_EQUITY"].iloc[-1],
+
+        "Final Capital": final_capital,
+
         "Total Return": total_return * 100,
+
         "CAGR": cagr * 100,
-        "Buy and Hold Return": buy_hold_return * 100,
-        "Annual Volatility": annual_volatility * 100,
+
+        "Buy and Hold Return": (
+            buy_hold_return * 100
+        ),
+
+        "Annual Volatility": (
+            annual_volatility * 100
+        ),
+
         "Sharpe Ratio": sharpe_ratio,
-        "Maximum Drawdown": max_drawdown * 100,
+
+        "Maximum Drawdown": (
+            max_drawdown * 100
+        ),
+
         "Market Exposure": exposure * 100,
+
         "Transactions": trades
+
     }
 
-    return data, metrics    
+    return data, metrics
 
     risk_amount = capital * risk_percent / 100
 
@@ -493,8 +671,9 @@ def run_backtest(
     return max(shares, 0)
 
 
+
 # ==========================================
-# 8. MAIN APPLICATION
+# 9. MAIN APPLICATION SETTINGS
 # ==========================================
 
 st.sidebar.header("Analysis Settings")
@@ -514,39 +693,62 @@ risk_percent = st.sidebar.slider(
     step=0.1
 )
 
-query = st.text_input(
-    "Search for a company or stock ticker",
-    placeholder="Example: Apple or AAPL"
-)
+st.sidebar.divider()
 
+st.sidebar.subheader("Supported Asset Classes")
+
+st.sidebar.write("📈 Stocks")
+st.sidebar.write("📊 ETFs")
+st.sidebar.write("₿ Cryptocurrencies")
+st.sidebar.write("💼 Mutual Funds")
+st.sidebar.write("📉 Futures Contracts")
+
+# ==========================================
+# 10. ASSET SEARCH
+# ==========================================
+
+query = st.text_input(
+    "Search for any financial instrument",
+    placeholder="AAPL, SPY, BTC-USD, ETH-USD, GLD, QQQ"
+)
 
 if query:
 
-    shares = None
-    current_price = None
+    with st.spinner("Searching financial markets..."):
 
-    with st.spinner("Searching for stocks..."):
-
-        results = search_stock(query)
+        results = search_assets(query)
 
     if not results:
 
-        st.error("No matching stocks found.")
+        st.error("No matching assets found.")
 
         st.stop()
 
     selected = st.selectbox(
-        "Select a company",
+        "Select your financial instrument",
         results,
         format_func=lambda x: (
-            f'{x["name"]} ({x["symbol"]})'
+            f'{x["name"]} | {x["symbol"]} | '
+            f'{x["type"]} | {x["exchange"]}'
         )
     )
 
     ticker = selected["symbol"]
 
+    asset_type = selected["type"]
+
+    st.info(
+        f'Asset: {asset_type} | '
+        f'Exchange: {selected["exchange"]} | '
+        f'Currency: {selected["currency"]}'
+    )
+
+    # ======================================
+    # 11. DOWNLOAD MARKET DATA
+    # ======================================
+
     with st.spinner(
-        "Downloading historical data and calculating indicators..."
+        "Downloading historical market data..."
     ):
 
         history = load_history(ticker)
@@ -560,12 +762,16 @@ if query:
 
         st.stop()
 
+    # Calculate indicators
+
     df = calculate_indicators(history)
 
     risks = calculate_risks(df)
 
     if risks is None:
+
         st.error("Unable to calculate historical risk.")
+
         st.stop()
 
     score, signal = calculate_score(df)
@@ -576,8 +782,14 @@ if query:
 
     current_price = float(last["Close"])
 
+    fractional = asset_type == "Cryptocurrency"
+
+    annualization = (
+        365 if fractional else 252
+    )
+
     # ======================================
-    # 9. OVERVIEW
+    # 12. ASSET OVERVIEW
     # ======================================
 
     st.divider()
@@ -587,15 +799,16 @@ if query:
     )
 
     st.caption(
-        f"Historical data: "
-        f"{df.index[0].date()} - {df.index[-1].date()}"
+        f'Asset Type: {asset_type} | '
+        f'Historical Data: {df.index[0].date()} '
+        f'- {df.index[-1].date()}'
     )
 
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric(
         "Current Price",
-        f"${current_price:,.2f}"
+        f"${current_price:,.4f}"
     )
 
     col2.metric(
@@ -605,16 +818,16 @@ if query:
 
     col3.metric(
         "MACD",
-        f'{last["MACD"]:.3f}'
+        f'{last["MACD"]:.4f}'
     )
 
     col4.metric(
         "Technical Score",
-        f"{score}"
+        str(score)
     )
 
     # ======================================
-    # 10. ANALYSIS SIGNAL
+    # 13. TECHNICAL SIGNAL
     # ======================================
 
     st.subheader("Technical Analysis Result")
@@ -632,12 +845,12 @@ if query:
         st.warning(signal)
 
     st.caption(
-        "Technical score is a rule-based indicator, "
+        "This technical score is a rule-based indicator, "
         "not a calibrated probability of future returns."
     )
 
     # ======================================
-    # 11. PRICE CHART
+    # 14. HISTORICAL PRICE CHART
     # ======================================
 
     st.subheader("Historical Price Chart")
@@ -648,7 +861,7 @@ if query:
         go.Scatter(
             x=df.index,
             y=df["Close"],
-            name="Stock Price",
+            name="Market Price",
             line=dict(
                 color="#2196F3",
                 width=2
@@ -674,11 +887,29 @@ if query:
         )
     )
 
+    chart.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["BB_UPPER"],
+            name="Bollinger Upper",
+            line=dict(dash="dot")
+        )
+    )
+
+    chart.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["BB_LOWER"],
+            name="Bollinger Lower",
+            line=dict(dash="dot")
+        )
+    )
+
     chart.update_layout(
         height=550,
         template="plotly_dark",
         xaxis_title="Date",
-        yaxis_title="Adjusted Price",
+        yaxis_title="Market Price",
         hovermode="x unified"
     )
 
@@ -688,7 +919,7 @@ if query:
     )
 
     # ======================================
-    # 12. RSI CHART
+    # 15. RSI CHART
     # ======================================
 
     st.subheader("Relative Strength Index")
@@ -728,7 +959,49 @@ if query:
     )
 
     # ======================================
-    # 13. RISK DASHBOARD
+    # 16. MACD CHART
+    # ======================================
+
+    st.subheader("MACD Momentum Analysis")
+
+    macd_chart = go.Figure()
+
+    macd_chart.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["MACD"],
+            name="MACD"
+        )
+    )
+
+    macd_chart.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["MACD_SIGNAL"],
+            name="Signal Line"
+        )
+    )
+
+    macd_chart.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["MACD_HIST"],
+            name="MACD Histogram"
+        )
+    )
+
+    macd_chart.update_layout(
+        height=350,
+        template="plotly_dark"
+    )
+
+    st.plotly_chart(
+        macd_chart,
+        use_container_width=True
+    )
+
+    # ======================================
+    # 17. RISK DASHBOARD
     # ======================================
 
     st.subheader("Risk Assessment")
@@ -761,7 +1034,7 @@ if query:
     )
 
     # ======================================
-    # 14. SUPPORT AND RESISTANCE
+    # 18. SUPPORT AND RESISTANCE
     # ======================================
 
     st.subheader("Technical Price Levels")
@@ -770,61 +1043,70 @@ if query:
 
     col1.metric(
         "Support",
-        f"${support:.2f}"
+        f"${support:.4f}"
     )
 
     col2.metric(
         "Current Price",
-        f"${current_price:.2f}"
+        f"${current_price:.4f}"
     )
 
     col3.metric(
         "Resistance",
-        f"${resistance:.2f}"
+        f"${resistance:.4f}"
     )
 
-
-    # ==========================================
-    # POSITION RISK CALCULATOR
-    # ==========================================
+    # ======================================
+    # 19. POSITION RISK CALCULATOR
+    # ======================================
 
     st.subheader("Position Risk Calculator")
 
+    atr = float(last["ATR"])
+
     if (
-        current_price is not None
-        and pd.notna(current_price)
-        and last["ATR"] is not None
-        and pd.notna(last["ATR"])
-        and last["ATR"] > 0
+        pd.notna(atr)
+        and atr > 0
+        and current_price > 0
     ):
 
         stop_price = (
-            current_price - 2 * float(last["ATR"])
+            current_price - 2 * atr
         )
 
-        shares = calculate_position_size(
+        if stop_price <= 0:
+
+            stop_price = current_price * 0.5
+
+        quantity = calculate_position_size(
             capital,
             risk_percent,
             current_price,
-            stop_price
+            stop_price,
+            fractional=fractional
         )
-
-        if shares is None:
-            shares = 0
 
         risk_amount = (
             capital * risk_percent / 100
         )
 
         position_value = (
-            shares * current_price
+            quantity * current_price
+        )
+
+        actual_risk = (
+            quantity * abs(
+                current_price - stop_price
+            )
         )
 
         col1, col2, col3 = st.columns(3)
 
         col1.metric(
-            "Suggested Share Quantity",
-            f"{shares:,}"
+            "Suggested Quantity",
+            f"{quantity:,.8f}"
+            if fractional
+            else f"{quantity:,}"
         )
 
         col2.metric(
@@ -838,23 +1120,27 @@ if query:
         )
 
         st.write(
-            f"Illustrative Stop Level: ${stop_price:.2f}"
+            f"Illustrative Stop Level: ${stop_price:,.4f}"
+        )
+
+        st.write(
+            f"Estimated Planned Risk: ${actual_risk:,.2f}"
         )
 
         st.caption(
-            "This is an illustrative position-sizing calculation. "
-            "Stop orders cannot guarantee execution at the specified price."
+            "Futures contract multipliers, margin, fees and "
+            "slippage are not included. Stop orders cannot "
+            "guarantee execution at the specified price."
         )
 
     else:
 
         st.warning(
-            "Insufficient price or volatility data "
-            "to calculate position sizing."
+            "Insufficient data for position sizing."
         )
 
     # ======================================
-    # 16. HISTORICAL DATA TABLE
+    # 20. HISTORICAL TECHNICAL DATA
     # ======================================
 
     st.subheader("Historical Technical Data")
@@ -865,10 +1151,13 @@ if query:
         "SMA50",
         "SMA100",
         "SMA200",
+        "EMA12",
+        "EMA26",
         "RSI",
         "MACD",
         "ATR",
-        "VOLATILITY"
+        "VOLATILITY",
+        "OBV"
     ]
 
     st.dataframe(
@@ -877,229 +1166,312 @@ if query:
     )
 
     # ======================================
-    # 17. CSV EXPORT
+    # 21. CSV EXPORT
     # ======================================
-
-    csv = df.to_csv().encode("utf-8")
 
     st.download_button(
         label="Download Full Historical Analysis",
-        data=csv,
+        data=df.to_csv().encode("utf-8"),
         file_name=f"{ticker}_analysis.csv",
         mime="text/csv"
     )
 
-    
 # ==========================================
-# BACKTESTING DASHBOARD
+# 22. HISTORICAL STRATEGY BACKTESTING
 # ==========================================
 
-st.divider()
+if query:
 
-st.header("Historical Strategy Backtesting")
+    st.divider()
 
-st.write(
-    "Test the technical trading strategy against "
-    "historical market data."
-)
+    st.header("Historical Strategy Backtesting")
 
-transaction_cost = st.slider(
-    "Transaction Cost (Basis Points)",
-    min_value=0,
-    max_value=50,
-    value=10,
-    step=1
-)
+    st.write(
+        "Test the technical trading strategy against "
+        "historical market data and compare it with "
+        "a buy-and-hold strategy."
+    )
 
-if st.button("Run Historical Backtest"):
+    transaction_cost = st.slider(
+        "Transaction Cost (Basis Points)",
+        min_value=0,
+        max_value=50,
+        value=10,
+        step=1
+    )
 
-    try:
+    if st.button(
+        "Run Historical Backtest",
+        type="primary"
+    ):
 
-        backtest_df, backtest_metrics = run_backtest(
-            df,
-            initial_capital=capital,
-            transaction_cost_bps=transaction_cost
-        )
+        try:
 
-        st.subheader("Backtesting Performance")
+            backtest_df, metrics = run_backtest(
+                df,
+                initial_capital=capital,
+                transaction_cost_bps=transaction_cost,
+                annualization=annualization
+            )
 
-        col1, col2, col3 = st.columns(3)
+            # ==================================
+            # PERFORMANCE METRICS
+            # ==================================
 
-        col1.metric(
-            "Final Portfolio Value",
-            f'${backtest_metrics["Final Capital"]:,.2f}'
-        )
+            st.subheader("Backtesting Performance")
 
-        col2.metric(
-            "Total Strategy Return",
-            f'{backtest_metrics["Total Return"]:.2f}%'
-        )
+            col1, col2, col3 = st.columns(3)
 
-        col3.metric(
-            "Annualized Return",
-            f'{backtest_metrics["CAGR"]:.2f}%'
-        )
+            col1.metric(
+                "Final Portfolio Value",
+                f'${metrics["Final Capital"]:,.2f}'
+            )
 
-        col1, col2, col3 = st.columns(3)
+            col2.metric(
+                "Total Strategy Return",
+                f'{metrics["Total Return"]:.2f}%'
+            )
 
-        col1.metric(
-            "Sharpe Ratio",
-            f'{backtest_metrics["Sharpe Ratio"]:.2f}'
-        )
+            col3.metric(
+                "Annualized Return",
+                f'{metrics["CAGR"]:.2f}%'
+            )
 
-        col2.metric(
-            "Maximum Drawdown",
-            f'{backtest_metrics["Maximum Drawdown"]:.2f}%'
-        )
+            col1, col2, col3 = st.columns(3)
 
-        col3.metric(
-            "Annual Volatility",
-            f'{backtest_metrics["Annual Volatility"]:.2f}%'
-        )
+            col1.metric(
+                "Sharpe Ratio",
+                f'{metrics["Sharpe Ratio"]:.2f}'
+            )
 
-        col1, col2, col3 = st.columns(3)
+            col2.metric(
+                "Maximum Drawdown",
+                f'{metrics["Maximum Drawdown"]:.2f}%'
+            )
 
-        col1.metric(
-            "Buy and Hold Return",
-            f'{backtest_metrics["Buy and Hold Return"]:.2f}%'
-        )
+            col3.metric(
+                "Annual Volatility",
+                f'{metrics["Annual Volatility"]:.2f}%'
+            )
 
-        col2.metric(
-            "Market Exposure",
-            f'{backtest_metrics["Market Exposure"]:.2f}%'
-        )
+            col1, col2, col3 = st.columns(3)
 
-        col3.metric(
-            "Transactions",
-            f'{backtest_metrics["Transactions"]}'
-        )
+            col1.metric(
+                "Buy and Hold Return",
+                f'{metrics["Buy and Hold Return"]:.2f}%'
+            )
 
-        # Equity Curve
+            col2.metric(
+                "Market Exposure",
+                f'{metrics["Market Exposure"]:.2f}%'
+            )
 
-        st.subheader("Portfolio Equity Curve")
+            col3.metric(
+                "Transactions",
+                f'{metrics["Transactions"]}'
+            )
 
-        equity_chart = go.Figure()
+            # ==================================
+            # EQUITY CURVE
+            # ==================================
 
-        equity_chart.add_trace(
-            go.Scatter(
-                x=backtest_df.index,
-                y=backtest_df["STRATEGY_EQUITY"],
-                name="Trading Strategy",
-                line=dict(
-                    color="#00C896",
-                    width=2
+            st.subheader("Portfolio Equity Curve")
+
+            equity_chart = go.Figure()
+
+            equity_chart.add_trace(
+                go.Scatter(
+                    x=backtest_df.index,
+                    y=backtest_df["STRATEGY_EQUITY"],
+                    name="Trading Strategy",
+                    line=dict(
+                        color="#00C896",
+                        width=2
+                    )
                 )
             )
-        )
 
-        equity_chart.add_trace(
-            go.Scatter(
-                x=backtest_df.index,
-                y=backtest_df["BUY_HOLD_EQUITY"],
-                name="Buy and Hold",
-                line=dict(
-                    color="#2196F3",
-                    width=2
+            equity_chart.add_trace(
+                go.Scatter(
+                    x=backtest_df.index,
+                    y=backtest_df["BUY_HOLD_EQUITY"],
+                    name="Buy and Hold",
+                    line=dict(
+                        color="#2196F3",
+                        width=2
+                    )
                 )
             )
-        )
 
-        equity_chart.update_layout(
-            template="plotly_dark",
-            height=450,
-            yaxis_title="Portfolio Value ($)",
-            xaxis_title="Date",
-            hovermode="x unified"
-        )
-
-        st.plotly_chart(
-            equity_chart,
-            use_container_width=True
-        )
-
-        # Drawdown Chart
-
-        st.subheader("Historical Drawdown")
-
-        drawdown_chart = go.Figure()
-
-        drawdown_chart.add_trace(
-            go.Scatter(
-                x=backtest_df.index,
-                y=backtest_df["STRATEGY_DRAWDOWN"] * 100,
-                name="Strategy Drawdown",
-                fill="tozeroy",
-                line=dict(color="#FF5252")
+            equity_chart.update_layout(
+                template="plotly_dark",
+                height=450,
+                yaxis_title="Portfolio Value ($)",
+                xaxis_title="Date",
+                hovermode="x unified"
             )
-        )
 
-        drawdown_chart.update_layout(
-            template="plotly_dark",
-            height=300,
-            yaxis_title="Drawdown (%)"
-        )
+            st.plotly_chart(
+                equity_chart,
+                use_container_width=True
+            )
 
-        st.plotly_chart(
-            drawdown_chart,
-            use_container_width=True
-        )
+            # ==================================
+            # DRAWDOWN CHART
+            # ==================================
 
-        # Export Results
+            st.subheader("Historical Drawdown")
 
-        st.download_button(
-            "Download Backtesting Results",
-            data=backtest_df.to_csv().encode("utf-8"),
-            file_name=f"{ticker}_backtest.csv",
-            mime="text/csv"
-        )
-# NEW BACKTESTING DASHBOARD
-        st.success("Backtesting completed successfully.")
+            drawdown_chart = go.Figure()
 
-        st.warning(
-            "Historical backtesting does not predict future "
-            "performance. Results exclude taxes, market impact, "
-            "financing costs and other possible trading expenses."
-        )
+            drawdown_chart.add_trace(
+                go.Scatter(
+                    x=backtest_df.index,
+                    y=(
+                        backtest_df["STRATEGY_DRAWDOWN"]
+                        * 100
+                    ),
+                    name="Strategy Drawdown",
+                    fill="tozeroy",
+                    line=dict(color="#FF5252")
+                )
+            )
 
-    except Exception as error:
+            drawdown_chart.add_trace(
+                go.Scatter(
+                    x=backtest_df.index,
+                    y=(
+                        backtest_df["BUY_HOLD_DRAWDOWN"]
+                        * 100
+                    ),
+                    name="Buy and Hold Drawdown",
+                    line=dict(color="#2196F3")
+                )
+            )
 
-        st.error(f"Backtesting error: {error}")
+            drawdown_chart.update_layout(
+                template="plotly_dark",
+                height=350,
+                yaxis_title="Drawdown (%)",
+                xaxis_title="Date"
+            )
+
+            st.plotly_chart(
+                drawdown_chart,
+                use_container_width=True
+            )
+
+            # ==================================
+            # BACKTEST DATA EXPORT
+            # ==================================
+
+            st.subheader("Export Backtesting Results")
+
+            st.download_button(
+                label="Download Backtesting Results",
+                data=backtest_df.to_csv().encode("utf-8"),
+                file_name=f"{ticker}_backtest.csv",
+                mime="text/csv"
+            )
+
+            st.success(
+                "Historical backtesting completed successfully."
+            )
+
+            st.warning(
+                "Historical backtesting does not predict future "
+                "performance. Results exclude taxes, market impact, "
+                "financing costs and other possible trading expenses."
+            )
+
+        except Exception as error:
+
+            st.error(
+                f"Backtesting error: {error}"
+            )
+
+
+# ==========================================
+# 23. WELCOME SCREEN
+# ==========================================
 
 else:
 
     st.info(
-        "Enter a company name or stock ticker "
-        "to start the analysis."
+        "Enter a company name, stock ticker, ETF "
+        "or cryptocurrency to start your analysis."
     )
 
-    st.markdown(
-        """
-        ### Available Analysis Modules
+    st.subheader("Available Analysis Modules")
 
-        - Historical stock prices
-        - Technical indicators
-        - Trend identification
-        - Momentum analysis
-        - Volatility measurement
-        - Historical risk assessment
-        - Support and resistance levels
-        - Position sizing
-        - Historical data export
-        """
-    )
+    st.markdown("""
+    ### Supported Financial Instruments
+
+    - Stocks and equities
+    - Exchange-traded funds (ETFs)
+    - Cryptocurrencies
+    - Mutual funds
+    - Futures contracts
+
+    ### Quantitative Analysis
+
+    - Historical market prices
+    - SMA and EMA indicators
+    - RSI momentum analysis
+    - MACD analysis
+    - Bollinger Bands
+    - Average True Range
+    - On Balance Volume
+    - Historical volatility
+
+    ### Risk Management
+
+    - Maximum drawdown
+    - Historical VaR
+    - Historical CVaR
+    - Position sizing
+    - Risk per trade
+    - Support and resistance
+
+    ### Strategy Backtesting
+
+    - Historical strategy simulation
+    - Buy and hold comparison
+    - Portfolio equity curves
+    - Sharpe ratio
+    - CAGR
+    - Transaction cost modeling
+    - Drawdown analysis
+
+    ### Data Export
+
+    - Historical analysis CSV
+    - Backtesting results CSV
+    """)
 
 
 # ==========================================
-# 18. FOOTER
+# 24. APPLICATION FOOTER
 # ==========================================
 
 st.divider()
 
 st.caption(
-    "AI Stock Analyzer | Independent Quantitative Analysis"
+    "AI Multi-Asset Analyzer | Independent Quantitative Analysis"
+)
+
+st.caption(
+    "Historical market data provided through Yahoo Finance "
+    "using the yfinance Python library."
+)
+
+st.caption(
+    "Asset availability, historical coverage and data quality "
+    "depend on the data provider."
 )
 
 st.caption(
     "This application provides mathematical market analysis "
-    "and does not guarantee investment returns or eliminate risk."
+    "and educational risk estimates. It does not execute trades "
+    "or guarantee investment returns."
 )
